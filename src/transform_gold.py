@@ -1,10 +1,9 @@
 import duckdb
 
 
-SILVER_PATH = "data/market_data_features.parquet"
-
-GOLD_RANKING_PATH = "data/asset_ranking.parquet"
-GOLD_ALERTS_PATH = "data/market_alerts.parquet"
+SILVER_PATH = "/opt/airflow/data/market_data_features.parquet"
+GOLD_RANKING_PATH = "/opt/airflow/data/asset_ranking.parquet"
+GOLD_ALERTS_PATH = "/opt/airflow/data/market_alerts.parquet"
 
 
 def create_connection():

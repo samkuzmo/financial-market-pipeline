@@ -26,6 +26,6 @@ def save_raw_data(df, path):
 if __name__ == "__main__":
     df = fetch_market_data()
 
-    save_raw_data(df, "data/market_data_raw.parquet")
+    save_raw_data(df, "/opt/airflow/data/market_data_raw.parquet")
 
     print("Dados ingeridos com sucesso")

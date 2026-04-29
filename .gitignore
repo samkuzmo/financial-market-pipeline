@@ -17,3 +17,6 @@ data/*.parquet
 # OS files
 .DS_Store
 Thumbs.db
+
+# Airflow Logs
+logs/
