@@ -1,0 +1,6 @@
+pandas
+yfinance
+duckdb
+pyarrow
+jupyter
+notebook
