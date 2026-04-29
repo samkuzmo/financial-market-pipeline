@@ -1,0 +1,20 @@
+{
+  "python.defaultInterpreterPath": "./venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+
+  "editor.formatOnSave": true,
+
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": false,
+  "python.linting.flake8Enabled": true,
+
+  "python.analysis.typeCheckingMode": "basic",
+
+  "files.autoSave": "afterDelay",
+
+  "editor.rulers": [88],
+
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  }
+}
