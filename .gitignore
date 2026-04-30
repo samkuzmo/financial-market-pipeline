@@ -20,3 +20,6 @@ Thumbs.db
 
 # Airflow Logs
 logs/
+
+#Arquivo de environment
+.env

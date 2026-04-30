@@ -20,12 +20,22 @@ def fetch_market_data(symbol="PETR4.SA", period="6mo"):
 
     return df
 
-def save_raw_data(df, path):
-    df.to_parquet(path, index=False)
+def save_raw_data(df, bucket_name):
+
+    path = f"s3://{bucket_name}/bronze/market_data_raw.parquet"
+
+    df.to_parquet(
+        path,
+        storage_options = {"anon": False},
+        index = False
+    )
+
+    print(f"Dados salvos em: {path}")
 
 if __name__ == "__main__":
+    
+    BUCKET_NAME = "samuel-financial-data-lake"
+
     df = fetch_market_data()
 
-    save_raw_data(df, "/opt/airflow/data/market_data_raw.parquet")
-
-    print("Dados ingeridos com sucesso")
+    save_raw_data(df, BUCKET_NAME)

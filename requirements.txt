@@ -4,3 +4,5 @@ duckdb
 pyarrow
 jupyter
 notebook
+boto3
+s3fs

@@ -1,12 +1,16 @@
 import duckdb
 
-
-BRONZE_PATH = "/opt/airflow/data/market_data_raw.parquet"
-SILVER_PATH = "/opt/airflow/data/market_data_features.parquet"
+BRONZE_PATH = "s3://samuel-financial-data-lake/bronze/market_data_raw.parquet"
+SILVER_PATH = "s3://samuel-financial-data-lake/silver/market_data_features.parquet"
 
 
 def create_connection():
-    return duckdb.connect()
+    con = duckdb.connect()
+
+    con.execute("INSTALL httpfs;")
+    con.execute("LOAD httpfs;")
+
+    return con
 
 
 def load_bronze_data(con):

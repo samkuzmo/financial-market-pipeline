@@ -32,6 +32,9 @@ services:
 
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
 
+    env_file:
+      - .env
+
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -67,11 +70,15 @@ services:
 
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
 
+    env_file:
+      - .env
+
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./src:/opt/airflow/src
       - ./data:/opt/airflow/data
+      - C:/Users/samku/.aws:/home/airflow/.aws
 
     ports:
       - "8080:8080"
@@ -95,11 +102,15 @@ services:
 
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
 
+    env_file:
+      - .env
+
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./src:/opt/airflow/src
       - ./data:/opt/airflow/data
+      - C:/Users/samku/.aws:/home/airflow/.aws
 
     command: scheduler
 
