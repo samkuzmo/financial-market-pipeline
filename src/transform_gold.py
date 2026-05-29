@@ -5,14 +5,15 @@ SILVER_PATH = "s3://samuel-financial-data-lake/silver/market_data_features.parqu
 GOLD_RANKING_PATH = "s3://samuel-financial-data-lake/gold/asset_ranking.parquet"
 GOLD_ALERTS_PATH = "s3://samuel-financial-data-lake/gold/market_alerts.parquet"
 
+
 def create_connection():
-    
+
     con = duckdb.connect()
 
     con.execute("INSTALL httpfs;")
     con.execute("LOAD httpfs;")
 
-    con.execute(f"""
+    con.execute("""
         CREATE OR REPLACE SECRET s3_secret (
             TYPE S3,
             PROVIDER credential_chain
@@ -20,6 +21,7 @@ def create_connection():
     """)
 
     return con
+
 
 def load_silver_data(con):
 
@@ -49,7 +51,7 @@ def create_asset_ranking(con):
                     LAG(close, 30)
                     OVER (
                         PARTITION BY symbol
-                        ORDER BY date
+                        ORDER BY trade_date
                     )
                 ) - 1 AS return_30d,
 
@@ -68,7 +70,7 @@ def create_asset_ranking(con):
 
             SELECT
                 symbol,
-                date,
+                trade_date,
 
                 close,
 
@@ -114,7 +116,7 @@ def create_market_alerts(con):
         SELECT
             symbol,
 
-            date,
+            trade_date,
 
             volatility_7d,
 
