@@ -41,7 +41,7 @@ def create_base_returns(con):
             SELECT
                 symbol,
 
-                CAST(Date AS DATE) AS trade_date,
+                CAST(index AS DATE) AS trade_date,
 
                 Close AS close,
 
