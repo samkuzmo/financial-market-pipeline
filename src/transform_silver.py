@@ -32,24 +32,35 @@ def create_base_returns(con):
     con.execute("""
         CREATE OR REPLACE TABLE base_returns AS
 
+        WITH normalized AS (
+
+            SELECT
+                symbol,
+
+                CAST(Date AS DATE) AS date,
+
+                Close AS close,
+
+                Volume AS volume
+
+            FROM market_data_raw
+        )
+
         SELECT
             symbol,
-
-            CAST(Date AS DATE) AS date,
-
-            Close AS close,
-
-            Volume AS volume,
+            date,
+            close,
+            volume,
 
             (
-                Close / LAG(Close)
+                close / LAG(close)
                 OVER (
                     PARTITION BY symbol
-                    ORDER BY Date
+                    ORDER BY date
                 )
             ) - 1 AS return_1d
 
-        FROM market_data_raw
+        FROM normalized
     """)
 
 
