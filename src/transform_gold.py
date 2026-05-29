@@ -15,8 +15,7 @@ def create_connection():
     con.execute(f"""
         CREATE OR REPLACE SECRET s3_secret (
             TYPE S3,
-            PROVIDER credential_chain,
-            CHAIN 'instance'
+            PROVIDER credential_chain
         );
     """)
 
