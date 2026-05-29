@@ -5,12 +5,13 @@ SILVER_PATH = "s3://samuel-financial-data-lake/silver/market_data_features.parqu
 
 
 def create_connection():
+
     con = duckdb.connect()
 
     con.execute("INSTALL httpfs;")
     con.execute("LOAD httpfs;")
 
-    con.execute(f"""
+    con.execute("""
         CREATE OR REPLACE SECRET s3_secret (
             TYPE S3,
             PROVIDER credential_chain
@@ -21,14 +22,17 @@ def create_connection():
 
 
 def load_bronze_data(con):
+
     con.execute(f"""
         CREATE OR REPLACE TABLE market_data_raw AS
+
         SELECT *
         FROM read_parquet('{BRONZE_PATH}')
     """)
 
 
 def create_base_returns(con):
+
     con.execute("""
         CREATE OR REPLACE TABLE base_returns AS
 
@@ -37,7 +41,7 @@ def create_base_returns(con):
             SELECT
                 symbol,
 
-                CAST(Date AS DATE) AS date,
+                CAST(Date AS DATE) AS trade_date,
 
                 Close AS close,
 
@@ -48,7 +52,7 @@ def create_base_returns(con):
 
         SELECT
             symbol,
-            date,
+            trade_date,
             close,
             volume,
 
@@ -56,7 +60,7 @@ def create_base_returns(con):
                 close / LAG(close)
                 OVER (
                     PARTITION BY symbol
-                    ORDER BY date
+                    ORDER BY trade_date
                 )
             ) - 1 AS return_1d
 
@@ -65,12 +69,13 @@ def create_base_returns(con):
 
 
 def create_market_features(con):
+
     con.execute("""
         CREATE OR REPLACE TABLE market_data_features AS
 
         SELECT
             symbol,
-            date,
+            trade_date,
             close,
             volume,
             return_1d,
@@ -81,7 +86,7 @@ def create_market_features(con):
             AVG(close)
             OVER (
                 PARTITION BY symbol
-                ORDER BY date
+                ORDER BY trade_date
                 ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
             ) AS sma_7,
 
@@ -91,7 +96,7 @@ def create_market_features(con):
             AVG(close)
             OVER (
                 PARTITION BY symbol
-                ORDER BY date
+                ORDER BY trade_date
                 ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
             ) AS sma_30,
 
@@ -101,7 +106,7 @@ def create_market_features(con):
             STDDEV(return_1d)
             OVER (
                 PARTITION BY symbol
-                ORDER BY date
+                ORDER BY trade_date
                 ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
             ) AS volatility_7d
 
@@ -110,6 +115,7 @@ def create_market_features(con):
 
 
 def export_silver_data(con):
+
     con.execute(f"""
         COPY market_data_features
         TO '{SILVER_PATH}'
@@ -118,13 +124,16 @@ def export_silver_data(con):
 
 
 def validate_data(con):
+
     result = con.execute("""
         SELECT
             symbol,
             COUNT(*) AS total_rows,
-            MIN(date) AS min_date,
-            MAX(date) AS max_date
+            MIN(trade_date) AS min_date,
+            MAX(trade_date) AS max_date
+
         FROM market_data_features
+
         GROUP BY symbol
     """).fetchdf()
 
@@ -133,6 +142,7 @@ def validate_data(con):
 
 
 def run_silver_transformation():
+
     con = create_connection()
 
     print("Carregando Bronze...")
