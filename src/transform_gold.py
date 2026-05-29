@@ -13,9 +13,10 @@ def create_connection():
     con.execute("LOAD httpfs;")
 
     con.execute(f"""
-        CREATE OR REPLACE SECRET (
+        CREATE OR REPLACE SECRET s3_secret (
             TYPE S3,
-            PROVIDER CREDENTIAL_CHAIN
+            PROVIDER credential_chain,
+            CHAIN 'instance'
         );
     """)
 
