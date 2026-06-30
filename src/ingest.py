@@ -63,23 +63,42 @@ def fetch_market_data(
             )
 
             if df.empty:
-                logger.warning(f"No data returned for {symbol}")
+                logger.warning(
+                    f"No data returned for {symbol}"
+                )
                 continue
+
+            if isinstance(
+                df.columns,
+                pd.MultiIndex,
+            ):
+                df.columns = (
+                    df.columns.get_level_values(0)
+                )
 
             df.reset_index(inplace=True)
 
+            df.columns = [
+                str(col).strip()
+                for col in df.columns
+            ]
+
             df["symbol"] = symbol
-            df["ingestion_timestamp"] = datetime.now(UTC)
+            df["ingestion_timestamp"] = (
+                datetime.now(UTC)
+            )
 
             all_data.append(df)
 
             logger.info(
-                f"Successfully fetched {len(df)} rows for {symbol}"
+                f"Successfully fetched "
+                f"{len(df)} rows for {symbol}"
             )
 
         except Exception as e:
             logger.exception(
-                f"Error fetching data for {symbol}: {e}"
+                f"Error fetching data for "
+                f"{symbol}: {e}"
             )
 
     if not all_data:
@@ -93,7 +112,8 @@ def fetch_market_data(
     )
 
     logger.info(
-        f"Total rows fetched: {len(final_df)}"
+        f"Total rows fetched: "
+        f"{len(final_df)}"
     )
 
     return final_df
