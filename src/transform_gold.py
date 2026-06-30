@@ -1,9 +1,25 @@
+import logging
+from datetime import UTC, datetime
+
 import duckdb
 
 
-SILVER_PATH = "s3://samuel-financial-data-lake/silver/market_data_features.parquet"
-GOLD_RANKING_PATH = "s3://samuel-financial-data-lake/gold/asset_ranking.parquet"
-GOLD_ALERTS_PATH = "s3://samuel-financial-data-lake/gold/market_alerts.parquet"
+SILVER_PATH = (
+    "s3://samuel-financial-data-lake/"
+    "silver/**/*.parquet"
+)
+
+GOLD_BUCKET = (
+    "s3://samuel-financial-data-lake/gold"
+)
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+logger = logging.getLogger(__name__)
 
 
 def create_connection():
@@ -25,15 +41,35 @@ def create_connection():
 
 def load_silver_data(con):
 
+    logger.info(
+        "Loading Silver files..."
+    )
+
     con.execute(f"""
         CREATE OR REPLACE TABLE market_features AS
 
-        SELECT *
-        FROM read_parquet('{SILVER_PATH}')
+        SELECT DISTINCT *
+        FROM read_parquet(
+            '{SILVER_PATH}',
+            union_by_name = true
+        )
     """)
+
+    rows = con.execute("""
+        SELECT COUNT(*)
+        FROM market_features
+    """).fetchone()[0]
+
+    logger.info(
+        f"Loaded {rows} Silver rows"
+    )
 
 
 def create_asset_ranking(con):
+
+    logger.info(
+        "Creating asset ranking..."
+    )
 
     con.execute("""
         CREATE OR REPLACE TABLE asset_ranking AS
@@ -43,9 +79,6 @@ def create_asset_ranking(con):
             SELECT
                 *,
 
-                -----------------------------------
-                -- Retorno acumulado 30 dias
-                -----------------------------------
                 (
                     close /
                     LAG(close, 30)
@@ -55,11 +88,9 @@ def create_asset_ranking(con):
                     )
                 ) - 1 AS return_30d,
 
-                -----------------------------------
-                -- Sinal de tendência
-                -----------------------------------
                 CASE
-                    WHEN sma_7 > sma_30 THEN 1
+                    WHEN sma_7 > sma_30
+                    THEN 1
                     ELSE 0
                 END AS trend_signal
 
@@ -69,24 +100,7 @@ def create_asset_ranking(con):
         scored AS (
 
             SELECT
-                symbol,
-                trade_date,
-
-                close,
-
-                return_1d,
-                return_30d,
-
-                volatility_7d,
-
-                sma_7,
-                sma_30,
-
-                trend_signal,
-
-                -----------------------------------
-                -- Score final
-                -----------------------------------
+                *,
                 (
                     COALESCE(return_30d, 0)
                     - COALESCE(volatility_7d, 0)
@@ -94,39 +108,66 @@ def create_asset_ranking(con):
                 ) AS score_final
 
             FROM latest_data
+        ),
+
+        latest_snapshot AS (
+
+            SELECT *
+            FROM scored
+
+            WHERE trade_date = (
+                SELECT MAX(trade_date)
+                FROM scored
+            )
         )
 
         SELECT
             *,
-
             RANK()
             OVER (
                 ORDER BY score_final DESC
             ) AS rank_position
 
-        FROM scored
+        FROM latest_snapshot
     """)
+
+    rows = con.execute("""
+        SELECT COUNT(*)
+        FROM asset_ranking
+    """).fetchone()[0]
+
+    logger.info(
+        f"Created ranking for {rows} assets"
+    )
 
 
 def create_market_alerts(con):
+
+    logger.info(
+        "Creating market alerts..."
+    )
 
     con.execute("""
         CREATE OR REPLACE TABLE market_alerts AS
 
         SELECT
             symbol,
-
             trade_date,
-
             volatility_7d,
 
-            'HIGH_VOLATILITY' AS alert_type,
+            'HIGH_VOLATILITY'
+                AS alert_type,
 
-            'Volatilidade acima de 5%' AS alert_description,
+            'Volatilidade acima de 5%'
+                AS alert_description,
 
             CASE
-                WHEN volatility_7d > 0.10 THEN 'HIGH'
-                WHEN volatility_7d > 0.05 THEN 'MEDIUM'
+                WHEN volatility_7d > 0.10
+                    THEN 'HIGH'
+
+                WHEN volatility_7d > 0.05
+                    THEN 'MEDIUM'
+
                 ELSE 'LOW'
             END AS severity
 
@@ -135,64 +176,137 @@ def create_market_alerts(con):
         WHERE volatility_7d > 0.05
     """)
 
+    rows = con.execute("""
+        SELECT COUNT(*)
+        FROM market_alerts
+    """).fetchone()[0]
 
-def export_gold_data(con):
-
-    con.execute(f"""
-        COPY asset_ranking
-        TO '{GOLD_RANKING_PATH}'
-        (FORMAT PARQUET)
-    """)
-
-    con.execute(f"""
-        COPY market_alerts
-        TO '{GOLD_ALERTS_PATH}'
-        (FORMAT PARQUET)
-    """)
+    logger.info(
+        f"Created {rows} alerts"
+    )
 
 
 def validate_gold(con):
 
-    ranking = con.execute("""
-        SELECT *
+    ranking_count = con.execute("""
+        SELECT COUNT(*)
         FROM asset_ranking
-        ORDER BY rank_position
-        LIMIT 10
-    """).fetchdf()
+    """).fetchone()[0]
 
-    alerts = con.execute("""
-        SELECT *
+    alerts_count = con.execute("""
+        SELECT COUNT(*)
         FROM market_alerts
-        LIMIT 10
+    """).fetchone()[0]
+
+    logger.info(
+        f"Ranking rows: {ranking_count}"
+    )
+
+    logger.info(
+        f"Alert rows: {alerts_count}"
+    )
+
+    top_assets = con.execute("""
+        SELECT
+            symbol,
+            score_final,
+            rank_position
+
+        FROM asset_ranking
+
+        ORDER BY rank_position
+
+        LIMIT 5
     """).fetchdf()
 
-    print("\n=== TOP RANKING ===")
-    print(ranking)
+    logger.info(
+        f"\nTop Assets:\n{top_assets}"
+    )
 
-    print("\n=== ALERTAS ===")
-    print(alerts)
+
+def export_gold_data(con):
+
+    logger.info(
+        "Exporting Gold datasets..."
+    )
+
+    execution_time = datetime.now(UTC)
+
+    partition = execution_time.strftime(
+        "%Y-%m-%d"
+    )
+
+    filename = execution_time.strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    ranking_path = (
+        f"{GOLD_BUCKET}/asset_ranking/"
+        f"ingestion_date={partition}/"
+        f"asset_ranking_{filename}.parquet"
+    )
+
+    alerts_path = (
+        f"{GOLD_BUCKET}/market_alerts/"
+        f"ingestion_date={partition}/"
+        f"market_alerts_{filename}.parquet"
+    )
+
+    con.execute(f"""
+        COPY (
+            SELECT *
+            FROM asset_ranking
+        )
+        TO '{ranking_path}'
+        (
+            FORMAT PARQUET
+        )
+    """)
+
+    con.execute(f"""
+        COPY (
+            SELECT *
+            FROM market_alerts
+        )
+        TO '{alerts_path}'
+        (
+            FORMAT PARQUET
+        )
+    """)
+
+    logger.info(
+        f"Asset ranking exported to "
+        f"{ranking_path}"
+    )
+
+    logger.info(
+        f"Market alerts exported to "
+        f"{alerts_path}"
+    )
 
 
 def run_gold_transformation():
 
+    logger.info(
+        "Starting Gold transformation..."
+    )
+
     con = create_connection()
 
-    print("Carregando dados Silver...")
     load_silver_data(con)
 
-    print("Criando ranking de ativos...")
     create_asset_ranking(con)
 
-    print("Criando alertas de mercado...")
     create_market_alerts(con)
 
-    print("Exportando datasets Gold...")
-    export_gold_data(con)
-
-    print("Validando resultados...")
     validate_gold(con)
 
-    print("\nTransformação Gold concluída com sucesso")
+    export_gold_data(con)
+
+    logger.info(
+        "Gold transformation completed "
+        "successfully"
+    )
 
 
 if __name__ == "__main__":
