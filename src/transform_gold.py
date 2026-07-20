@@ -48,7 +48,15 @@ def load_silver_data(con):
     con.execute(f"""
         CREATE OR REPLACE TABLE market_features AS
 
-        SELECT DISTINCT *
+        SELECT DISTINCT
+                symbol,
+                trade_date,
+                close,
+                volume,
+                return_1d,
+                sma_7,
+                sma_30,
+                volatility_7d
         FROM read_parquet(
             '{SILVER_PATH}',
             union_by_name = true
@@ -254,7 +262,19 @@ def export_gold_data(con):
 
     con.execute(f"""
         COPY (
-            SELECT *
+            SELECT 
+                symbol,
+                trade_date,
+                close,
+                volume,
+                return_1d,
+                sma_7,
+                sma_30,
+                volatility_7d,
+                return_30d,
+                trend_signal,
+                score_final,
+                rank_position
             FROM asset_ranking
         )
         TO '{ranking_path}'
@@ -265,7 +285,13 @@ def export_gold_data(con):
 
     con.execute(f"""
         COPY (
-            SELECT *
+            SELECT 
+                symbol,
+                trade_date,
+                volatility_7d,
+                alert_type,
+                alert_description,
+                severity
             FROM market_alerts
         )
         TO '{alerts_path}'
