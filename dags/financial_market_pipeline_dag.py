@@ -20,7 +20,7 @@ with DAG(
 
     start_date=datetime(2026, 1, 1),
 
-    schedule="@daily",
+    schedule="0 4 * * *",
 
     catchup=False,
 
@@ -45,4 +45,10 @@ with DAG(
         bash_command="python /opt/airflow/src/transform_gold.py",
     )
 
-    ingest_task >> silver_task >> gold_task
+    update_partitions = BashOperator(
+        task_id="update_partitions",
+
+        bash_command="python /opt/airflow/src/update_partitions.py",
+    )
+
+    ingest_task >> silver_task >> gold_task >> update_partitions
