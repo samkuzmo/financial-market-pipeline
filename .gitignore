@@ -23,3 +23,9 @@ logs/
 
 #Arquivo de environment
 .env
+
+#Scripts de teste de backfill
+scripts/
+
+#Dashboard em desenvolvimento
+Dashboard/
