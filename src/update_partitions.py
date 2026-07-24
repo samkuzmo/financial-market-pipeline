@@ -4,7 +4,7 @@ import time
 import boto3
 
 
-DATABASE = "financial_market"
+DATABASE = "financial-market"
 
 OUTPUT = (
     "s3://samuel-financial-data-lake/"
