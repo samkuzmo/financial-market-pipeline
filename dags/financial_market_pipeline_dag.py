@@ -20,7 +20,7 @@ with DAG(
 
     start_date=datetime(2026, 1, 1),
 
-    schedule="0 4 * * *",
+    schedule="0 23 * * *",
 
     catchup=False,
 
