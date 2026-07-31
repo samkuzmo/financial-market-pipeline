@@ -1,106 +1,204 @@
 # Financial Market Pipeline
 
-Pipeline de dados para ingestão, transformação e análise de dados financeiros utilizando arquitetura moderna de Data Lake.
+Pipeline de Engenharia de Dados para ingestão, processamento e análise de dados financeiros utilizando uma arquitetura moderna de Data Lake baseada em camadas Bronze, Silver e Gold.
 
-## Stack do Projeto
+O projeto implementa um pipeline completo de dados financeiros utilizando dados históricos da Yahoo Finance API, armazenamento em AWS S3, processamento analítico com DuckDB, orquestração com Apache Airflow e consumo analítico através de ferramentas de BI.
 
-- Python
-- DuckDB
-- Parquet
-- Docker
-- Apache Airflow
-- AWS S3
-- yFinance API
+---
 
-## Arquitetura
+# Arquitetura
 
-O pipeline segue a arquitetura de Data Lake em camadas:
+O pipeline segue uma arquitetura de Data Lake em camadas utilizando o conceito de Medallion Architecture.
 
-```text
-Yahoo Finance API
-        ↓
-Airflow DAGs
-        ↓
-DuckDB Transformations
-        ↓
-AWS S3 Data Lake
-(Bronze / Silver / Gold)
-```
+Fluxo geral:
+
+![Arquitetura do Pipeline](https://github.com/samkuzmo/financial-market-pipeline/blob/main/images/Pipeline_architecture.png)
+
+---
+
+# Stack do Projeto
+
+## Linguagens e Processamento
+
+* Python
+* SQL
+* DuckDB
+
+## Engenharia de Dados
+
+* Apache Airflow
+* Docker
+* AWS S3
+* Apache Athena
+* Parquet
+
+## Fonte de Dados
+
+* Yahoo Finance API utilizando yFinance
+
+## Visualização
+
+* Power BI
 
 ---
 
 # Camadas do Data Lake
 
-## Bronze
+## Bronze Layer
 
-Ingestão de dados financeiros via Yahoo Finance API utilizando `yfinance`.
+Responsável pela ingestão dos dados brutos provenientes da Yahoo Finance API.
 
 Características:
-- dados crus
-- persistência em Parquet
-- armazenamento no AWS S3
-- adição de timestamp de ingestão
 
-Exemplo:
-- OHLCV
-- símbolo do ativo
-- data da ingestão
+* Dados históricos OHLCV dos ativos financeiros
+* Persistência em formato Parquet
+* Armazenamento particionado no AWS S3
+* Inclusão de metadados de ingestão
+* Validação automática da qualidade dos dados
+* Geração de relatórios de validação em JSON
+
+Estrutura:
+
+```text
+bronze/
+└── ingestion_date=YYYY-MM-DD/
+    ├── market_data_raw_TIMESTAMP.parquet
+    └── ingestion_report_TIMESTAMP.json
+```
+
+O relatório de validação contém informações como:
+
+* quantidade de registros ingeridos
+* ativos esperados e ativos ausentes
+* valores nulos encontrados
+* registros duplicados
+* schema dos dados
+* intervalo de datas processado
+* tempo de execução
+
+![Exemplo JSON Bronze](https://github.com/samkuzmo/financial-market-pipeline/blob/main/images/Exemplo_JSON_bronze.png)
 
 ---
 
-## Silver
+## Silver Layer
 
-Transformações analíticas utilizando DuckDB.
+Responsável pelo processamento analítico e transformação dos dados brutos.
 
-Principais transformações:
-- cálculo de retornos diários
-- médias móveis
-- volatilidade
-- padronização de schema
-- tratamento analítico dos dados
+Principais operações:
 
-Tecnologias:
-- DuckDB SQL Engine
-- Parquet
-- S3 Object Storage
+* padronização do schema
+* tratamento de dados
+* cálculo de retornos diários
+* médias móveis
+* indicadores de volatilidade
+* criação de features analíticas
+
+A camada Silver utiliza dados históricos disponíveis para realizar os cálculos corretamente, garantindo que métricas como médias móveis considerem todo o histórico necessário.
+
+Após o processamento, apenas o snapshot correspondente à execução mais recente é armazenado.
+
+Estrutura:
+
+```text
+silver/
+└── ingestion_date=YYYY-MM-DD/
+    └── market_data_features.parquet
+```
+
+IMAGE PLACEHOLDER (SILVER TRANSFORM)
 
 ---
 
-## Gold
+## Gold Layer
 
-Camada analítica orientada a negócio.
+Camada final orientada ao consumo analítico e regras de negócio.
 
-Métricas e agregações:
-- ranking de ativos
-- indicadores de volatilidade
-- métricas consolidadas
-- datasets prontos para consumo analítico
+Responsável pela criação de datasets prontos para análise.
+
+Principais produtos:
+
+### Asset Ranking
+
+Ranking de ativos baseado em indicadores como:
+
+* retorno acumulado
+* tendência de preço
+* volatilidade
+* score final
+
+### Market Alerts
+
+Identificação de situações relevantes:
+
+* alta volatilidade
+* movimentos anormais
+* sinais de mercado
+
+Estrutura:
+
+```text
+gold/
+└── ingestion_date=YYYY-MM-DD/
+    ├── asset_ranking.parquet
+    └── market_alerts.parquet
+```
 
 ---
 
 # Orquestração
 
-O pipeline é orquestrado utilizando Apache Airflow executando em containers Docker.
+O pipeline é executado utilizando Apache Airflow em containers Docker.
 
-A DAG executa automaticamente:
+A DAG controla todo o fluxo:
 
-1. Ingestão da camada Bronze
-2. Transformação da camada Silver
-3. Geração da camada Gold
+```text
+ingest_bronze
+        |
+        v
+transform_silver
+        |
+        v
+generate_gold
+        |
+        v
+update_partitions
+```
+
+A execução é automatizada e responsável por:
+
+1. Buscar novos dados da Yahoo Finance API
+2. Armazenar dados brutos na Bronze
+3. Validar qualidade dos dados ingeridos
+4. Processar transformações analíticas
+5. Gerar datasets Gold
+6. Atualizar partições para consumo analítico
+
+IMAGE PLACEHOLDER (AIRFLOW DAG)
 
 ---
 
 # Armazenamento
 
-Os dados são armazenados em formato Parquet no AWS S3 seguindo estrutura de Data Lake:
+Os dados são armazenados em AWS S3 seguindo uma estrutura de Data Lake particionada.
 
 ```text
-s3://bucket-name/
-│
+financial-data-lake/
+
 ├── bronze/
+│   └── ingestion_date=YYYY-MM-DD/
+│       ├── market_data_raw.parquet
+│       └── ingestion_report.json
+│
 ├── silver/
+│   └── ingestion_date=YYYY-MM-DD/
+│       └── market_data_features.parquet
+│
 └── gold/
+    └── ingestion_date=YYYY-MM-DD/
+        ├── asset_ranking.parquet
+        └── market_alerts.parquet
 ```
+IMAGE PLACEHOLDER (ORGANIZAÇÃO DO BUCKET)
 
 ---
 
@@ -108,45 +206,70 @@ s3://bucket-name/
 
 ## DuckDB
 
-Utilizado como engine analítica SQL para processamento local de arquivos Parquet diretamente no S3.
+Utilizado como engine analítica para processamento dos arquivos Parquet.
 
-Vantagens:
-- alta performance analítica
-- baixo consumo de recursos
-- integração nativa com Parquet
-- leitura direta de dados no S3
-- excelente para pipelines analíticos pequenos e médios
+Principais vantagens:
+
+* processamento SQL eficiente
+* leitura direta de Parquet
+* integração com armazenamento em S3
+* baixo consumo de recursos
+* adequado para workloads analíticos
 
 ---
 
 ## Parquet
 
-Formato colunar utilizado para:
-- compressão eficiente
-- leitura analítica rápida
-- integração com engines modernas de dados
+Formato utilizado para armazenamento dos dados.
+
+Benefícios:
+
+* armazenamento colunar
+* compressão eficiente
+* leitura otimizada para análises
+* compatibilidade com ferramentas modernas
+
+---
+
+## AWS S3
+
+Utilizado como armazenamento principal do Data Lake.
+
+Benefícios:
+
+* separação entre processamento e armazenamento
+* alta durabilidade
+* escalabilidade
+* arquitetura cloud-native
 
 ---
 
 ## Docker
 
 Utilizado para:
-- padronização do ambiente
-- isolamento de dependências
-- execução consistente do Airflow
-- reprodutibilidade do pipeline
+
+* isolamento de ambientes
+* gerenciamento de dependências
+* execução consistente do Airflow
+* reprodutibilidade do pipeline
 
 ---
 
-## AWS S3
+# Consumo Analítico
 
-Utilizado como camada de armazenamento do Data Lake.
+Os dados da camada Gold são disponibilizados para análise utilizando AWS Athena e Power BI.
 
-Vantagens:
-- desacoplamento entre compute e storage
-- armazenamento escalável
-- persistência cloud-native
-- arquitetura moderna de dados
+Consultas analíticas são realizadas diretamente sobre os arquivos Parquet armazenados no S3.
+
+O dashboard apresenta:
+
+* ranking de ativos
+* indicadores de retorno
+* volatilidade
+* alertas de mercado
+* análise individual dos ativos
+
+IMAGE PLACEHOLDER (DASHBOARD)
 
 ---
 
@@ -154,13 +277,20 @@ Vantagens:
 
 ```text
 financial-pipeline/
-│
+
 ├── dags/
+│
 ├── src/
-├── data/
+│   ├── bronze/
+│   ├── silver/
+│   └── gold/
+│
 ├── docker/
+│
 ├── requirements.txt
+│
 ├── docker-compose.yml
+│
 └── README.md
 ```
 
@@ -168,11 +298,10 @@ financial-pipeline/
 
 # Próximos Passos
 
-- Particionamento de datasets no S3
-- Integração com AWS Athena
-- Implementação de Delta Lake
-- Processamento distribuído com Spark
-- Dashboard analítico
-- Monitoramento e observabilidade
-- Deploy cloud-native
-- Suporte para ingestão e processamento de múltiplos ativos financeiros
+* Implementação de Delta Lake
+* Processamento distribuído utilizando Apache Spark
+* Monitoramento avançado de qualidade dos dados
+* Implementação de CI/CD
+* Deploy cloud-native
+* Expansão para múltiplas fontes financeiras
+* Automação de testes de dados
