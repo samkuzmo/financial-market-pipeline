@@ -110,6 +110,8 @@ def fetch_market_data(
         ignore_index=True,
     )
 
+    final_df["date"] = pd.to_datetime(final_df["date"]).dt.date
+
     logger.info(
         f"Total rows fetched: "
         f"{len(final_df)}"
