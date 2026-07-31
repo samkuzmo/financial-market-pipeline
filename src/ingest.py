@@ -261,7 +261,7 @@ def save_validation_report(
     )
 
     key = (
-        "bronze/"
+        "bronze/validation/"
         f"ingestion_date={partition}/"
         f"ingestion_report_{filename}.json"
     )
@@ -301,7 +301,7 @@ def save_raw_data(
     )
 
     path = (
-        f"s3://{bucket_name}/bronze/"
+        f"s3://{bucket_name}/bronze/data/"
         f"ingestion_date={partition}/"
         f"market_data_raw_{filename}.parquet"
     )
