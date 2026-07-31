@@ -81,7 +81,9 @@ def fetch_market_data(
             df.reset_index(inplace=True)
 
             df.columns = [
-                str(col).strip().lower()
+                str(col).strip()
+                .lower()
+                .replace(" ", "_")
                 for col in df.columns
             ]
 
@@ -235,10 +237,10 @@ def create_validation_report(
 
         "date_range": {
             "min_trade_date": (
-                str(df["date"].min().date())
+                str(df["date"].min())
             ),
             "max_trade_date": (
-                str(df["date"].max().date())
+                str(df["date"].max())
             ),
         },
     }
