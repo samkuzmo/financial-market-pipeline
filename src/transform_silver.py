@@ -1,18 +1,18 @@
 import logging
 from datetime import UTC, datetime
+import json
+import boto3
 
 import duckdb
 
+BUCKET_NAME = (
+    "samuel-financial-data-lake"
+) 
+
 BRONZE_PATH = (
-    "s3://samuel-financial-data-lake/"
-    "bronze/**/*.parquet"
+    f"s3://{BUCKET_NAME}/"
+    f"bronze/data/**/*.parquet"
 )
-
-SILVER_PATH = (
-    "s3://samuel-financial-data-lake/"
-    "silver/market_data_features.parquet"
-)
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,58 +64,56 @@ def load_bronze_data(con):
         f"Loaded {rows} Bronze rows"
     )
 
-    print(
-    con.execute("""
-        DESCRIBE market_data_raw
-    """).fetchdf()
-)
 
-
-def create_base_returns(con):
+def deduplicate_bronze_data(con):
 
     logger.info(
-        "Creating base returns..."
+        "Deduplicating Bronze data..."
     )
 
-    con.execute("""
-        CREATE OR REPLACE TABLE base_returns AS
+    con.execute(f"""
+        CREATE OR REPLACE TABLE deduplicated_market_data AS
 
         WITH normalized AS (
 
             SELECT
                 symbol,
-
-                CAST(Date AS DATE) AS trade_date,
-
-                Close AS close,
-
-                Volume AS volume,
-
-                ingestion_timestamp,
-
-                ROW_NUMBER()
-                OVER (
-                    PARTITION BY
-                        symbol,
-                        CAST(Date AS DATE)
-                    ORDER BY
-                        ingestion_timestamp DESC
-                ) AS rn
+                CAST(date AS DATE) AS trade_date,
+                close,
+                volume,
+                ingestion_timestamp
 
             FROM market_data_raw
+        
         ),
 
-        deduplicated AS (
+        ranked AS (
 
             SELECT
                 symbol,
                 trade_date,
                 close,
-                volume
+                volume,
+                ingestion_timestamp,
+
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        symbol,
+                        trade_date
+
+                    ORDER BY
+
+                        CASE
+                            WHEN close IS NOT NULL
+                             AND volume IS NOT NULL
+                            THEN 1
+                            ELSE 0
+                        END DESC,
+
+                        ingestion_timestamp DESC
+                ) AS rn
 
             FROM normalized
-
-            WHERE rn = 1
         )
 
         SELECT
@@ -123,29 +121,21 @@ def create_base_returns(con):
             trade_date,
             close,
             volume,
+            ingestion_timestamp
 
-            (
-                close / LAG(close)
-                OVER (
-                    PARTITION BY symbol
-                    ORDER BY trade_date
-                )
-            ) - 1 AS return_1d
+        FROM ranked
 
-        FROM deduplicated
-
-        ORDER BY
-            symbol,
-            trade_date
+        WHERE rn = 1
     """)
 
     rows = con.execute("""
         SELECT COUNT(*)
-        FROM base_returns
+        FROM deduplicated_market_data
     """).fetchone()[0]
 
     logger.info(
-        f"Base returns created with {rows} rows"
+        f"Deduplicated Bronze data contains "
+        f"{rows} rows"
     )
 
 
@@ -157,6 +147,26 @@ def create_market_features(con):
 
     con.execute("""
         CREATE OR REPLACE TABLE market_data_features AS
+
+        WITH base_returns AS (
+
+            SELECT
+                symbol,
+                trade_date,
+                close,
+                volume,
+
+                (
+                    close
+                    / LAG(close)
+                    OVER (
+                        PARTITION BY symbol
+                        ORDER BY trade_date
+                    )
+                ) - 1 AS return_1d
+
+            FROM deduplicated_market_data
+        )
 
         SELECT
             symbol,
@@ -223,20 +233,80 @@ def export_silver_data(con):
     )
 
     output_path = (
-        "s3://samuel-financial-data-lake/"
-        f"silver/ingestion_date={partition}/"
+        f"s3://{BUCKET_NAME}/"
+        f"silver/data/ingestion_date={partition}/"
         f"market_data_features_{filename}.parquet"
     )
 
     row_count = con.execute("""
+        WITH latest_market_snapshot AS (
+
+            SELECT
+                symbol,
+                trade_date,
+                close,
+                volume,
+                return_1d,
+                sma_7,
+                sma_30,
+                volatility_7d
+
+            FROM (
+                SELECT
+                    symbol,
+                    trade_date,
+                    close,
+                    volume,
+                    return_1d,
+                    sma_7,
+                    sma_30,
+                    volatility_7d,
+
+                    ROW_NUMBER() OVER (
+                        PARTITION BY symbol
+                        ORDER BY trade_date DESC
+                    ) AS row_num
+
+                FROM market_data_features
+            )
+
+            WHERE row_num = 1
+        )
+
         SELECT COUNT(*)
-        FROM market_data_features
+        FROM latest_market_snapshot
     """).fetchone()[0]
 
     con.execute(f"""
         COPY (
-            SELECT *
-            FROM market_data_features
+            WITH latest_market_snapshot AS (
+
+                SELECT
+                    *
+                FROM (
+                    SELECT
+                        *,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY symbol
+                            ORDER BY trade_date DESC
+                        ) AS row_num
+
+                    FROM market_data_features
+                )
+                WHERE row_num = 1
+            )
+
+            SELECT
+                symbol,
+                trade_date,
+                close,
+                volume,
+                return_1d,
+                sma_7,
+                sma_30,
+                volatility_7d
+
+            FROM latest_market_snapshot
         )
         TO '{output_path}'
         (
@@ -249,86 +319,363 @@ def export_silver_data(con):
         f"to {output_path}"
     )
 
-def validate_data(con):
+def create_validation_report(
+        con,
+        execution_time: datetime,
+        start_time: datetime,
+        end_time: datetime,
+        current_step: str,
+        pipeline_status: str,
+) -> dict:
 
     logger.info(
-        "Running validations..."
+        "Creating Validation Report"
     )
 
-    summary = con.execute("""
-        SELECT
-            symbol,
-            COUNT(*) AS total_rows,
-            MIN(trade_date) AS min_date,
-            MAX(trade_date) AS max_date
+    if pipeline_status == "FAILED":
+        return {
+            "pipeline": "financial-market-pipeline",
+            "layer": "silver",
+            "execution_timestamp": (
+                execution_time.isoformat()
+            ),
+            "pipeline_status": "FAILED",
+            "status": "FAILED",
+            "current_step": current_step,
+        }
 
-        FROM market_data_features
+    expected_columns = [
+        "symbol",
+        "trade_date",
+        "close",
+        "volume",
+        "return_1d",
+        "sma_7",
+        "sma_30",
+        "volatility_7d",
+    ]
 
-        GROUP BY symbol
+    actual_columns = [
+        row[0]
+        for row in con.execute("""
+            DESCRIBE market_data_features
+        """).fetchall()
+    ]
 
-        ORDER BY symbol
-    """).fetchdf()
+    missing_columns = [
+        column
+        for column in expected_columns
+        if column not in actual_columns
+    ]
 
-    duplicates = con.execute("""
+    if missing_columns:
+        return {
+            "pipeline": "financial-market-pipeline",
+            "layer": "silver",
+            "execution_timestamp": (
+                execution_time.isoformat()
+            ),
+            "pipeline_status": pipeline_status,
+            "status": "FAILED",
+            "current_step": current_step,
+            "missing_columns": missing_columns,
+        }
+
+    rows_processed = con.execute("""
         SELECT COUNT(*)
-        FROM (
-
-            SELECT
-                symbol,
-                trade_date,
-                COUNT(*) AS total
-
-            FROM market_data_features
-
-            GROUP BY
-                symbol,
-                trade_date
-
-            HAVING COUNT(*) > 1
-        )
+        FROM market_data_features
     """).fetchone()[0]
 
-    null_symbols = con.execute("""
+    expected_assets = con.execute("""
+        SELECT COUNT(DISTINCT symbol)
+        FROM market_data_raw
+        """).fetchone()[0]
+
+    expected_symbols = [
+    row[0]
+    for row in con.execute("""
+        SELECT DISTINCT symbol
+        FROM market_data_raw
+    """).fetchall()
+]
+
+    assets_processed = con.execute("""
+        SELECT COUNT(DISTINCT symbol)
+        FROM market_data_features
+    """).fetchone()[0]
+
+    processed_assets = [
+        row[0]
+        for row in con.execute("""
+            SELECT DISTINCT symbol
+            FROM market_data_features
+        """).fetchall()
+    ]
+
+    missing_assets = sorted(
+        set(expected_symbols)
+        - set(processed_assets)
+    )
+
+    null_symbol = con.execute("""
         SELECT COUNT(*)
         FROM market_data_features
         WHERE symbol IS NULL
     """).fetchone()[0]
 
+    null_trade_date = con.execute("""
+        SELECT COUNT(*)
+        FROM market_data_features
+        WHERE trade_date IS NULL
+    """).fetchone()[0]
+
+    null_close = con.execute("""
+        SELECT COUNT(*)
+        FROM market_data_features
+        WHERE close IS NULL
+    """).fetchone()[0]
+
+    null_volume = con.execute("""
+        SELECT COUNT(*)
+        FROM market_data_features
+        WHERE volume IS NULL
+    """).fetchone()[0]
+
+    duplicated_trade_records = con.execute("""
+        SELECT COUNT(*)
+        FROM (
+            SELECT
+                symbol,
+                trade_date
+            FROM market_data_features
+            GROUP BY
+                symbol,
+                trade_date
+            HAVING COUNT(*) > 1
+        )
+    """).fetchone()[0]
+
+    snapshot_rows = con.execute("""
+        WITH latest_market_snapshot AS (
+
+            SELECT
+                symbol,
+                trade_date,
+
+                ROW_NUMBER() OVER (
+                    PARTITION BY symbol
+                    ORDER BY trade_date DESC
+                ) AS row_num
+
+            FROM market_data_features
+        )
+
+        SELECT COUNT(*)
+        FROM latest_market_snapshot
+
+        WHERE row_num = 1
+    """).fetchone()[0]
+
+    min_trade_date, max_trade_date = con.execute("""
+        SELECT
+            MIN(trade_date),
+            MAX(trade_date)
+        FROM market_data_features
+    """).fetchone()
+
+    if pipeline_status == "FAILED":
+        status = "FAILED"
+    else:
+        status = (
+            "SUCCESS"
+            if (
+                len(missing_columns) == 0
+                and len(missing_assets) == 0
+                and null_symbol == 0
+                and null_trade_date == 0
+                and null_close == 0
+                and null_volume == 0
+                and duplicated_trade_records == 0
+                and snapshot_rows == assets_processed
+            )
+            else "WARNING"
+        )
+
+    report = {
+        "pipeline": "financial-market-pipeline",
+        "layer": "silver",
+
+        "execution_timestamp": (
+            execution_time.isoformat()
+        ),
+
+        "current_step": current_step,
+
+        "pipeline_status":  pipeline_status,
+
+        "status": status,
+
+        "schema": {
+            "columns": actual_columns,
+        },
+
+        "metrics": {
+            "rows_processed": int(
+                rows_processed
+            ),
+            "expected_assets": (
+                expected_assets
+            ),
+            "assets_processed": int(
+                assets_processed
+            ),
+            "missing_assets": (
+                missing_assets
+            ),
+            "snapshot_rows": int(
+                snapshot_rows
+            ),
+            "null_symbol": int(
+                null_symbol
+            ),
+            "null_trade_date": int(
+                null_trade_date
+            ),
+            "null_close": int(
+                null_close
+            ),
+            "null_volume": int(
+                null_volume
+            ),
+            "duplicated_trade_records": int(
+                duplicated_trade_records
+            ),
+            "ingestion_duration_seconds": (
+                end_time - start_time
+            ).total_seconds()
+        },
+
+        "date_range": {
+            "min_trade_date": (
+                str(min_trade_date)
+            ),
+            "max_trade_date": (
+                str(max_trade_date)
+            ),
+        },
+    }
+
     logger.info(
-        f"Duplicate rows: {duplicates}"
+        "Validation Report created"
+    )
+
+    return report
+
+def save_validation_report(
+    report: dict,
+    bucket_name: str,
+    execution_time: datetime,
+) -> None:
+
+    partition = execution_time.strftime(
+        "%Y-%m-%d"
+    )
+
+    filename = execution_time.strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    key = (
+        "silver/validation/"
+        f"ingestion_date={partition}/"
+        f"ingestion_report_{filename}.json"
     )
 
     logger.info(
-        f"Null symbols: {null_symbols}"
+        f"Saving validation report to s3://{bucket_name}/{key}"
+    )
+
+    s3 = boto3.client("s3")
+
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=key,
+        Body=json.dumps(
+            report,
+            indent=4
+        ),
+        ContentType="application/json",
     )
 
     logger.info(
-        "\n=== SILVER VALIDATION ===\n"
-        f"{summary}"
+        "Validation Report saved successfully"
     )
-
 
 def run_silver_transformation():
 
-    logger.info(
-        "Starting Silver transformation..."
-    )
+    current_step = "DuckDB connection creation"
+    pipeline_status = "FAILED"
+    execution_time = datetime.now(UTC)
+    start_time = execution_time
+    con = None
 
-    con = create_connection()
+    try:
 
-    load_bronze_data(con)
+        logger.info(
+            "Starting Silver transformation..."
+        )
 
-    create_base_returns(con)
+        con = create_connection()
 
-    create_market_features(con)
+        current_step = "Bronze data loading"
+        load_bronze_data(con)
 
-    validate_data(con)
+        current_step = "Bronze data deduplication"
+        deduplicate_bronze_data(con)
 
-    export_silver_data(con)
+        current_step = "Market_features creation"
+        create_market_features(con)
 
-    logger.info(
-        "Silver transformation completed successfully"
-    )
+        current_step = "Silver data exportation"
+        export_silver_data(con)
+
+        pipeline_status = "SUCCESS"
+
+        logger.info(
+            "Silver transformation completed successfully"
+        )
+
+    except Exception as e:
+
+        pipeline_status = "FAILED"
+
+        logger.exception(
+            f"Silver transformation failed: {e}"
+        )
+
+    finally:
+        if con is not None:
+            end_time = datetime.now(UTC)
+
+            try:
+                report = create_validation_report(
+                    con, 
+                    execution_time, 
+                    start_time, 
+                    end_time, 
+                    current_step,
+                    pipeline_status
+                )
+                
+                save_validation_report(
+                    report,
+                    BUCKET_NAME,
+                    execution_time
+                    )
+
+            finally:
+                con.close()
+
 
 
 if __name__ == "__main__":
