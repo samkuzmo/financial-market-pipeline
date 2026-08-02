@@ -163,7 +163,16 @@ def create_market_features(con):
                         PARTITION BY symbol
                         ORDER BY trade_date
                     )
-                ) - 1 AS return_1d
+                ) - 1 AS return_1d,
+
+                (
+                    close /
+                    LAG(close, 30)
+                    OVER (
+                        PARTITION BY symbol
+                        ORDER BY trade_date
+                    )
+                ) - 1 AS return_30d
 
             FROM deduplicated_market_data
         )
@@ -174,6 +183,7 @@ def create_market_features(con):
             close,
             volume,
             return_1d,
+            return_30d,
 
             AVG(close)
             OVER (
@@ -247,6 +257,7 @@ def export_silver_data(con):
                 close,
                 volume,
                 return_1d,
+                return_30d,
                 sma_7,
                 sma_30,
                 volatility_7d
@@ -258,6 +269,7 @@ def export_silver_data(con):
                     close,
                     volume,
                     return_1d,
+                    return_30d,
                     sma_7,
                     sma_30,
                     volatility_7d,
@@ -302,6 +314,7 @@ def export_silver_data(con):
                 close,
                 volume,
                 return_1d,
+                return_30d,
                 sma_7,
                 sma_30,
                 volatility_7d
@@ -350,6 +363,7 @@ def create_validation_report(
         "close",
         "volume",
         "return_1d",
+        "return_30d",
         "sma_7",
         "sma_30",
         "volatility_7d",
